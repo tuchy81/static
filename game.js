@@ -1,7 +1,176 @@
 // ============================================================
-//  갤러그 3D — Three.js   (3 styles)
+//  갤러그 3D — Three.js   (3 styles + OBJ models + touch)
 // ============================================================
 /* global THREE, selectStyle */
+
+// ---- OBJ loader ----
+const objLoader = new THREE.OBJLoader();
+let loadedF35 = null;
+let loadedZombie = null;
+
+// Preload OBJ models
+function loadOBJModels() {
+  return Promise.all([
+    new Promise(resolve => {
+      objLoader.load('uploads_files_2634091_f35+base.obj', obj => {
+        // Normalize size & center
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 3.0 / maxDim;
+        obj.scale.setScalar(scale);
+        obj.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+        // Apply F-35 stealth colors per part
+        const colors = [
+          0x4a4e53, 0x5a5e63, 0x52565b, 0x3a3d42, 0x5a5e63,
+          0x4a4e53, 0x52565b, 0x3a3d42, 0x5a5e63, 0x4a4e53,
+          0x52565b, 0x5a5e63, 0x4a4e53, 0x3a3d42, 0x52565b,
+          0x5a5e63, 0x4a4e53
+        ];
+        let idx = 0;
+        obj.traverse(child => {
+          if (child.isMesh) {
+            const c = colors[idx % colors.length];
+            child.material = new THREE.MeshStandardMaterial({
+              color: c, flatShading: true,
+              roughness: 0.3, metalness: 0.7,
+            });
+            child.castShadow = true;
+            child.receiveShadow = true;
+            idx++;
+          }
+        });
+        // Wrap in group so we can add afterburner
+        const g = new THREE.Group();
+        g.add(obj);
+        // Cockpit canopy glow
+        const canopyGeo = new THREE.SphereGeometry(0.15, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+        const canopy = new THREE.Mesh(canopyGeo, new THREE.MeshStandardMaterial({
+          color: 0x88bbdd, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.6
+        }));
+        canopy.scale.set(1, 0.6, 1.5);
+        canopy.position.set(0, 0.2, -0.5);
+        g.add(canopy);
+        // Afterburner
+        const abGeo = new THREE.ConeGeometry(0.12, 0.6, 8);
+        const abMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff4400, emissiveIntensity: 2 });
+        const ab = new THREE.Mesh(abGeo, abMat);
+        ab.rotation.x = -Math.PI / 2;
+        ab.position.set(0, 0, 1.6);
+        ab.name = 'afterburner';
+        g.add(ab);
+        loadedF35 = g;
+        resolve();
+      }, undefined, () => { loadedF35 = null; resolve(); });
+    }),
+    new Promise(resolve => {
+      objLoader.load('uploads_files_1005291_zombie_full.obj', obj => {
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 1.4 / maxDim;
+        obj.scale.setScalar(scale);
+        obj.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+        obj.rotation.y = Math.PI; // 플레이어를 바라보도록 180도 회전
+        // Zombie skin/clothes colors
+        const skinColors = [0x5a6a45, 0x4a5a38, 0x3a4a30];
+        let idx = 0;
+        obj.traverse(child => {
+          if (child.isMesh) {
+            child.material = new THREE.MeshStandardMaterial({
+              color: skinColors[idx % skinColors.length],
+              flatShading: true, roughness: 0.8, metalness: 0.1,
+            });
+            child.castShadow = true;
+            idx++;
+          }
+        });
+        // Add glowing eyes
+        const eyeGeo = new THREE.SphereGeometry(0.04, 6, 6);
+        const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff3300, emissive: 0xff2200, emissiveIntensity: 2 });
+        [-0.08, 0.08].forEach(x => {
+          const eye = new THREE.Mesh(eyeGeo, eyeMat);
+          eye.position.set(x, 1.15, -0.15);
+          obj.add(eye);
+        });
+        loadedZombie = obj;
+        resolve();
+      }, undefined, () => { loadedZombie = null; resolve(); });
+    })
+  ]);
+}
+
+// ---- Touch controls ----
+const touchInput = { dx: 0, dz: 0, fire: false };
+let joystickActive = false;
+let joystickTouchId = null;
+let joystickStartX = 0, joystickStartY = 0;
+
+function isMobile() {
+  return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
+function setupTouchControls() {
+  if (!isMobile()) return;
+  const tc = document.getElementById('touch-controls');
+  tc.classList.add('vis');
+
+  const area = document.getElementById('joystick-area');
+  const knob = document.getElementById('joystick-knob');
+  const fireBtn = document.getElementById('fire-btn');
+  const maxDist = 55;
+
+  area.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    joystickTouchId = t.identifier;
+    joystickActive = true;
+    const rect = area.getBoundingClientRect();
+    joystickStartX = rect.left + rect.width / 2;
+    joystickStartY = rect.top + rect.height / 2;
+  }, { passive: false });
+
+  window.addEventListener('touchmove', e => {
+    if (!joystickActive) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystickTouchId) {
+        let ox = t.clientX - joystickStartX;
+        let oy = t.clientY - joystickStartY;
+        const dist = Math.sqrt(ox * ox + oy * oy);
+        if (dist > maxDist) { ox = ox / dist * maxDist; oy = oy / dist * maxDist; }
+        knob.style.left = (50 + ox) + 'px';
+        knob.style.top = (50 + oy) + 'px';
+        touchInput.dx = ox / maxDist;
+        touchInput.dz = oy / maxDist;
+      }
+    }
+  }, { passive: true });
+
+  const resetJoystick = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystickTouchId) {
+        joystickActive = false;
+        joystickTouchId = null;
+        touchInput.dx = 0;
+        touchInput.dz = 0;
+        knob.style.left = '50px';
+        knob.style.top = '50px';
+      }
+    }
+  };
+  window.addEventListener('touchend', resetJoystick);
+  window.addEventListener('touchcancel', resetJoystick);
+
+  // Fire button
+  fireBtn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    touchInput.fire = true;
+  }, { passive: false });
+  fireBtn.addEventListener('touchend', () => { touchInput.fire = false; });
+  fireBtn.addEventListener('touchcancel', () => { touchInput.fire = false; });
+}
 
 // ---- renderer / scene / camera ----
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -83,129 +252,22 @@ function MEmit(color, intensity) {
 //  STYLE 0 — F-35 Lightning II  (reference photo: dark grey stealth)
 // ============================================================
 function buildF35() {
+  if (loadedF35) {
+    return loadedF35.clone();
+  }
+  // Fallback: simple placeholder if OBJ failed to load
   const g = new THREE.Group();
-
-  // --- Fuselage: diamond cross-section, long tapered nose ---
-  const fuseShape = new THREE.Shape();
-  fuseShape.moveTo(0, 0.12);
-  fuseShape.lineTo(0.28, 0);
-  fuseShape.lineTo(0, -0.08);
-  fuseShape.lineTo(-0.28, 0);
-  fuseShape.closePath();
-
-  const fuseGeo = new THREE.ExtrudeGeometry(fuseShape, {
-    steps: 1, depth: 2.6, bevelEnabled: false
-  });
-  const fuseMat = M(0x5a5e63, { roughness: 0.35, metalness: 0.7 });
-  const fuse = new THREE.Mesh(fuseGeo, fuseMat);
-  fuse.rotation.x = -Math.PI / 2;
-  fuse.position.set(0, 0, -1.3);
-  g.add(fuse);
-
-  // Nose cone (sharper)
-  const noseGeo = new THREE.ConeGeometry(0.22, 1.0, 4);
-  const nose = new THREE.Mesh(noseGeo, M(0x4a4e53, { roughness: 0.3, metalness: 0.8 }));
-  nose.rotation.x = Math.PI / 2;
-  nose.rotation.y = Math.PI / 4;
-  nose.position.set(0, 0.03, -1.8);
-  g.add(nose);
-
-  // Belly (darker underside)
-  const bellyGeo = new THREE.BoxGeometry(0.5, 0.06, 1.8);
-  const belly = new THREE.Mesh(bellyGeo, M(0x3a3d42, { roughness: 0.4, metalness: 0.6 }));
-  belly.position.set(0, -0.08, 0);
-  g.add(belly);
-
-  // --- Cockpit canopy ---
-  const canopyGeo = new THREE.SphereGeometry(0.18, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2);
-  const canopy = new THREE.Mesh(canopyGeo, M(0x88bbdd, { roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.7 }));
-  canopy.scale.set(1, 0.7, 1.8);
-  canopy.position.set(0, 0.12, -0.75);
-  g.add(canopy);
-
-  // --- Main wings (trapezoidal, swept) ---
-  const wingShape = new THREE.Shape();
-  wingShape.moveTo(0, 0);
-  wingShape.lineTo(1.6, 0.4);
-  wingShape.lineTo(1.4, 0.7);
-  wingShape.lineTo(0, 0.5);
-  wingShape.closePath();
-
-  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.04, bevelEnabled: false });
-  const wingMat = M(0x52565b, { roughness: 0.35, metalness: 0.7 });
-
-  const lwing = new THREE.Mesh(wingGeo, wingMat);
-  lwing.rotation.x = -Math.PI / 2;
-  lwing.position.set(-0.28, -0.02, -0.15);
-  lwing.scale.x = -1;
-  g.add(lwing);
-
-  const rwing = new THREE.Mesh(wingGeo, wingMat);
-  rwing.rotation.x = -Math.PI / 2;
-  rwing.position.set(0.28, -0.02, -0.15);
-  g.add(rwing);
-
-  // --- Horizontal stabilizers ---
-  const stabShape = new THREE.Shape();
-  stabShape.moveTo(0, 0);
-  stabShape.lineTo(0.7, 0.15);
-  stabShape.lineTo(0.6, 0.35);
-  stabShape.lineTo(0, 0.25);
-  stabShape.closePath();
-  const stabGeo = new THREE.ExtrudeGeometry(stabShape, { depth: 0.03, bevelEnabled: false });
-
-  const lstab = new THREE.Mesh(stabGeo, wingMat);
-  lstab.rotation.x = -Math.PI / 2;
-  lstab.position.set(-0.25, 0, 0.95);
-  lstab.scale.x = -1;
-  g.add(lstab);
-
-  const rstab = new THREE.Mesh(stabGeo, wingMat);
-  rstab.rotation.x = -Math.PI / 2;
-  rstab.position.set(0.25, 0, 0.95);
-  g.add(rstab);
-
-  // --- Single vertical tail (canted slightly) ---
-  const tailShape = new THREE.Shape();
-  tailShape.moveTo(0, 0);
-  tailShape.lineTo(-0.15, 0.65);
-  tailShape.lineTo(0.2, 0.6);
-  tailShape.lineTo(0.25, 0);
-  tailShape.closePath();
-  const tailGeo = new THREE.ExtrudeGeometry(tailShape, { depth: 0.04, bevelEnabled: false });
-  const tail = new THREE.Mesh(tailGeo, M(0x5a5e63, { roughness: 0.3, metalness: 0.7 }));
-  tail.position.set(-0.02, 0.1, 0.85);
-  g.add(tail);
-
-  // --- Engine nozzle ---
-  const nozGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.3, 8);
-  const noz = new THREE.Mesh(nozGeo, M(0x333333, { roughness: 0.2, metalness: 0.9 }));
-  noz.rotation.x = Math.PI / 2;
-  noz.position.set(0, -0.01, 1.35);
-  g.add(noz);
-
-  // Afterburner glow
+  const bodyGeo = new THREE.ConeGeometry(0.3, 2.5, 4);
+  const body = new THREE.Mesh(bodyGeo, M(0x5a5e63, { roughness: 0.3, metalness: 0.7 }));
+  body.rotation.x = Math.PI / 2;
+  g.add(body);
+  const wingGeo = new THREE.BoxGeometry(2.5, 0.04, 0.6);
+  g.add(new THREE.Mesh(wingGeo, M(0x52565b, { roughness: 0.35, metalness: 0.7 })));
   const abGeo = new THREE.ConeGeometry(0.11, 0.5, 8);
-  const abMat = MEmit(0xff6600, 2);
-  const ab = new THREE.Mesh(abGeo, abMat);
-  ab.rotation.x = -Math.PI / 2;
-  ab.position.set(0, -0.01, 1.65);
-  ab.name = 'afterburner';
+  const ab = new THREE.Mesh(abGeo, MEmit(0xff6600, 2));
+  ab.rotation.x = -Math.PI / 2; ab.position.set(0, 0, 1.4); ab.name = 'afterburner';
   g.add(ab);
-
-  // --- Intake ducts (dark rectangles on sides) ---
-  const intGeo = new THREE.BoxGeometry(0.08, 0.12, 0.4);
-  const intMat = M(0x222222, { roughness: 0.8 });
-  const lint = new THREE.Mesh(intGeo, intMat);
-  lint.position.set(-0.3, -0.02, -0.35);
-  g.add(lint);
-  const rint = new THREE.Mesh(intGeo, intMat);
-  rint.position.set(0.3, -0.02, -0.35);
-  g.add(rint);
-
-  g.scale.set(1.3, 1.3, 1.3);
-  g.castShadow = true;
-  g.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  g.traverse(c => { if (c.isMesh) { c.castShadow = true; } });
   return g;
 }
 
@@ -564,121 +626,125 @@ function buildArcher() {
 }
 
 function buildZombie() {
+  if (loadedZombie) {
+    const clone = loadedZombie.clone();
+    // Slightly different color tint for variety
+    clone.traverse(child => {
+      if (child.isMesh && child.material) {
+        child.material = child.material.clone();
+        child.material.color.offsetHSL(0, 0, (Math.random() - 0.5) * 0.05);
+      }
+    });
+    return clone;
+  }
+  // Fallback
   const g = new THREE.Group();
   const skinMat = M(0x6b7a55);
-  // Body
-  const bodyGeo = new THREE.BoxGeometry(0.35, 0.45, 0.25);
-  g.add(new THREE.Mesh(bodyGeo, M(0x444450)));
-  // Head
-  const headGeo = new THREE.BoxGeometry(0.28, 0.28, 0.25);
-  const head = new THREE.Mesh(headGeo, skinMat);
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.45, 0.25), M(0x444450)));
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.25), skinMat);
   head.position.y = 0.35; g.add(head);
-  // Eyes
-  const eg = new THREE.SphereGeometry(0.04, 6, 6);
   const eyeMat = MEmit(0xff3300, 1.5);
-  [-0.07, 0.07].forEach(x => {
-    const e = new THREE.Mesh(eg, eyeMat);
-    e.position.set(x, 0.38, -0.13); g.add(e);
-  });
-  // Mouth
-  const mGeo = new THREE.BoxGeometry(0.12, 0.06, 0.03);
-  const m = new THREE.Mesh(mGeo, M(0x331111));
-  m.position.set(0, 0.26, -0.13); g.add(m);
-  // Arms reaching forward
-  const armGeo = new THREE.BoxGeometry(0.1, 0.1, 0.4);
-  [-0.25, 0.25].forEach(x => {
-    const a = new THREE.Mesh(armGeo, skinMat);
-    a.position.set(x, 0.05, -0.25);
-    a.rotation.x = -0.3;
-    g.add(a);
-  });
-  // Legs
-  const legGeo = new THREE.BoxGeometry(0.11, 0.3, 0.12);
-  [-0.1, 0.1].forEach(x => {
-    const l = new THREE.Mesh(legGeo, M(0x3a3a38));
-    l.position.set(x, -0.35, 0); g.add(l);
-  });
+  [-0.07, 0.07].forEach(x => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), eyeMat); e.position.set(x, 0.38, -0.13); g.add(e); });
+  [-0.25, 0.25].forEach(x => { const a = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.4), skinMat); a.position.set(x, 0.05, -0.25); a.rotation.x = -0.3; g.add(a); });
+  [-0.1, 0.1].forEach(x => { const l = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.3, 0.12), M(0x3a3a38)); l.position.set(x, -0.35, 0); g.add(l); });
   g.traverse(c => { if (c.isMesh) c.castShadow = true; });
   return g;
 }
 
 function buildZombieStrong() {
+  if (loadedZombie) {
+    const clone = loadedZombie.clone();
+    // Stronger zombie: bigger, darker purple tint, shoulder spikes
+    clone.scale.setScalar(clone.scale.x * 1.3);
+    clone.traverse(child => {
+      if (child.isMesh && child.material) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: 0x6a4570, flatShading: true, roughness: 0.7, metalness: 0.15
+        });
+        child.castShadow = true;
+      }
+    });
+    // Add shoulder spikes
+    const spMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, flatShading: true });
+    [-0.25, 0.25].forEach(x => {
+      const s = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.25, 4), spMat);
+      s.position.set(x, 1.05, 0);
+      clone.add(s);
+    });
+    // Brighter eyes
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 3 });
+    [-0.07, 0.07].forEach(x => {
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), eyeMat);
+      e.position.set(x, 1.15, -0.18);
+      clone.add(e);
+    });
+    return clone;
+  }
+  // Fallback
   const g = new THREE.Group();
   const skinMat = M(0x6a5570);
-  // Body
   g.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.35), M(0x553333)));
-  // Head
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.28), skinMat);
-  head.position.y = 0.4; g.add(head);
-  // Eyes
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.28), skinMat); head.position.y = 0.4; g.add(head);
   const eyeMat = MEmit(0xff0000, 2);
-  [-0.08, 0.08].forEach(x => {
-    const e = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), eyeMat);
-    e.position.set(x, 0.42, -0.15); g.add(e);
-  });
-  // Shoulder spikes
-  const spMat = M(0xaaaaaa, { metalness: 0.8 });
-  [-0.3, 0.3].forEach(x => {
-    const s = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.3, 4), spMat);
-    s.position.set(x, 0.4, 0); g.add(s);
-  });
-  // Big arms
-  const armGeo = new THREE.BoxGeometry(0.16, 0.15, 0.45);
-  [-0.38, 0.38].forEach(x => {
-    const a = new THREE.Mesh(armGeo, skinMat);
-    a.position.set(x, 0, -0.2);
-    a.rotation.x = -0.2;
-    g.add(a);
-  });
-  // Legs
-  [-0.13, 0.13].forEach(x => {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.35, 0.16), M(0x3a3035));
-    l.position.set(x, -0.4, 0); g.add(l);
-  });
+  [-0.08, 0.08].forEach(x => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), eyeMat); e.position.set(x, 0.42, -0.15); g.add(e); });
+  [-0.3, 0.3].forEach(x => { const s = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.3, 4), M(0xaaaaaa, { metalness: 0.8 })); s.position.set(x, 0.4, 0); g.add(s); });
+  [-0.38, 0.38].forEach(x => { const a = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.15, 0.45), skinMat); a.position.set(x, 0, -0.2); a.rotation.x = -0.2; g.add(a); });
+  [-0.13, 0.13].forEach(x => { const l = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.35, 0.16), M(0x3a3035)); l.position.set(x, -0.4, 0); g.add(l); });
   g.traverse(c => { if (c.isMesh) c.castShadow = true; });
   return g;
 }
 
 function buildZombieBoss() {
+  if (loadedZombie) {
+    const clone = loadedZombie.clone();
+    // Boss: much bigger, dark green, crown, glowing aura
+    clone.scale.setScalar(clone.scale.x * 2.8);
+    clone.traverse(child => {
+      if (child.isMesh && child.material) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: 0x3a4a2a, flatShading: true, roughness: 0.6, metalness: 0.2,
+          emissive: 0x111500, emissiveIntensity: 0.3,
+        });
+        child.castShadow = true;
+      }
+    });
+    // Crown
+    const crownMat = new THREE.MeshStandardMaterial({ color: 0x772288, emissive: 0x440066, emissiveIntensity: 1, flatShading: true });
+    for (let i = -1; i <= 1; i++) {
+      const c = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.2, 4), crownMat);
+      c.position.set(i * 0.1, 1.45, 0);
+      clone.add(c);
+    }
+    // Boss eyes
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 3 });
+    [-0.06, 0.06].forEach(x => {
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), eyeMat);
+      e.position.set(x, 1.2, -0.12);
+      clone.add(e);
+    });
+    // Core glow
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x44ff44, emissive: 0x22ff22, emissiveIntensity: 2, transparent: true, opacity: 0.6 })
+    );
+    core.position.y = 0.6;
+    core.name = 'core';
+    clone.add(core);
+    return clone;
+  }
+  // Fallback
   const g = new THREE.Group();
   const skinMat = M(0x4a5a3a);
-  // Body
   g.add(new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.8), skinMat));
-  // Head
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.45), M(0x556644));
-  head.position.y = 0.6; g.add(head);
-  // Crown
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.45), M(0x556644)); head.position.y = 0.6; g.add(head);
   const crownMat = M(0x772288, { emissive: 0x220044, emissiveIntensity: 0.5 });
-  for (let i = -1; i <= 1; i++) {
-    const c = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.35, 4), crownMat);
-    c.position.set(i * 0.15, 0.95, 0); g.add(c);
-  }
-  // Eyes
+  for (let i = -1; i <= 1; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.35, 4), crownMat); c.position.set(i * 0.15, 0.95, 0); g.add(c); }
   const eyeMat = MEmit(0xff0000, 2);
-  [-0.12, 0.12].forEach(x => {
-    const e = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), eyeMat);
-    e.position.set(x, 0.65, -0.24); g.add(e);
-  });
-  // Ribs
-  const ribMat = M(0xccbb99);
-  for (let i = -1; i <= 1; i++) {
-    const r = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.35, 0.03), ribMat);
-    r.position.set(i * 0.15, 0.05, -0.42); g.add(r);
-  }
-  // Huge arms
-  [-0.7, 0.7].forEach(x => {
-    const a = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.55, 0.35), skinMat);
-    a.position.set(x, -0.05, -0.15); g.add(a);
-    // Claws
-    const cl = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.2, 3), M(0xbbaa88));
-    cl.rotation.x = Math.PI / 2;
-    cl.position.set(x, -0.25, -0.4); g.add(cl);
-  });
-  // Legs
-  [-0.25, 0.25].forEach(x => {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.45, 0.22), M(0x3a4530));
-    l.position.set(x, -0.6, 0); g.add(l);
-  });
+  [-0.12, 0.12].forEach(x => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), eyeMat); e.position.set(x, 0.65, -0.24); g.add(e); });
+  [-0.7, 0.7].forEach(x => { const a = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.55, 0.35), skinMat); a.position.set(x, -0.05, -0.15); g.add(a); });
+  [-0.25, 0.25].forEach(x => { const l = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.45, 0.22), M(0x3a4530)); l.position.set(x, -0.6, 0); g.add(l); });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), MEmit(0x44ff44, 2));
+  core.position.y = 0.4; core.name = 'core'; g.add(core);
   g.traverse(c => { if (c.isMesh) c.castShadow = true; });
   return g;
 }
@@ -696,19 +762,37 @@ function buildMissile() {
 }
 function buildSeed() {
   const g = new THREE.Group();
-  const geo = new THREE.SphereGeometry(0.08, 6, 4);
-  geo.scale(0.6, 0.4, 1);
-  g.add(new THREE.Mesh(geo, M(0x2a1a0a)));
+  // 큰 수박씨 본체
+  const geo = new THREE.SphereGeometry(0.18, 6, 5);
+  geo.scale(0.7, 0.5, 1.2);
+  g.add(new THREE.Mesh(geo, M(0x1a1008, { emissive: 0x332200, emissiveIntensity: 0.3 })));
+  // 하이라이트 줄무늬
+  const stripe = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 6, 4),
+    M(0x3a2a10, { emissive: 0x443311, emissiveIntensity: 0.4 })
+  );
+  stripe.scale.set(0.3, 0.3, 1.1);
+  stripe.position.y = 0.02;
+  g.add(stripe);
+  // 발광 글로우
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0x88cc22, transparent: true, opacity: 0.25 })
+  );
+  glow.scale.set(0.7, 0.5, 1.2);
+  g.add(glow);
   return g;
 }
 function buildArrowProj() {
   const g = new THREE.Group();
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.7, 4), M(0x886633));
   shaft.rotation.x = Math.PI / 2; g.add(shaft);
+  // 촉이 -Z (앞쪽, 진행 방향)를 향하도록
   const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 3), M(0xaaaaaa, { metalness: 0.8 }));
-  tip.rotation.x = Math.PI / 2; tip.position.z = -0.4; g.add(tip);
+  tip.rotation.x = -Math.PI / 2; tip.position.z = -0.4; g.add(tip);
+  // 깃털이 +Z (뒤쪽)를 향하도록
   const fletch = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.1, 3), M(0xcc2222));
-  fletch.rotation.x = -Math.PI / 2; fletch.position.z = 0.35; g.add(fletch);
+  fletch.rotation.x = Math.PI / 2; fletch.position.z = 0.35; g.add(fletch);
   return g;
 }
 function buildEnemyShot(color) {
@@ -910,11 +994,15 @@ function clearGameObjects() {
   bossBarMesh.visible = false;
 }
 
-window.selectStyle = function(s) {
+window.selectStyle = async function(s) {
   currentStyle = s;
   clearGameObjects();
   // Remove old templates
   Object.values(templates).forEach(t => scene.remove(t));
+  // Ensure OBJ models loaded for styles that need them
+  if ((s === 0 && !loadedF35) || (s === 2 && !loadedZombie)) {
+    await loadOBJModels();
+  }
   buildTemplates(s);
   startGame();
 };
@@ -937,6 +1025,7 @@ function startGame() {
   document.getElementById('ui').classList.remove('active');
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('vis'));
   document.getElementById('hud').classList.remove('hidden');
+  if (isMobile()) document.getElementById('touch-controls').classList.add('vis');
   showBanner();
 }
 
@@ -944,6 +1033,7 @@ function gameOver() {
   gameState = 'gameover';
   document.getElementById('fScore').textContent = score;
   document.getElementById('hud').classList.add('hidden');
+  document.getElementById('touch-controls').classList.remove('vis');
   document.getElementById('ui').classList.add('active');
   document.getElementById('go-screen').classList.add('vis');
   hideBanner();
@@ -953,6 +1043,7 @@ function goMenu() {
   gameState = 'menu';
   clearGameObjects();
   document.getElementById('hud').classList.add('hidden');
+  document.getElementById('touch-controls').classList.remove('vis');
   document.getElementById('ui').classList.add('active');
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('vis'));
   document.getElementById('style-screen').classList.add('vis');
@@ -1014,6 +1105,8 @@ function update(dt) {
   if (keys['ArrowRight'] || keys['KeyD']) dx = 1;
   if (keys['ArrowUp'] || keys['KeyW']) dz = -1;
   if (keys['ArrowDown'] || keys['KeyS']) dz = 1;
+  // Touch joystick input
+  if (touchInput.dx || touchInput.dz) { dx = touchInput.dx; dz = touchInput.dz; }
   const spd = 8;
   player.x += dx * spd * dt;
   player.z += dz * spd * dt;
@@ -1038,7 +1131,7 @@ function update(dt) {
   }
 
   // --- Shoot ---
-  if (keys['Space'] && player.shootCool <= 0) {
+  if ((keys['Space'] || touchInput.fire) && player.shootCool <= 0) {
     player.shootCool = spreadShot > 0 ? 0.1 : 0.16;
     fireBullet(player.x, player.z - 0.5, 0, -28);
     if (spreadShot > 0) {
@@ -1246,7 +1339,12 @@ function loop(time) {
   requestAnimationFrame(loop);
 }
 
-// Start with style 0 templates for menu background
-buildTemplates(0);
+// Setup touch controls
+setupTouchControls();
+
+// Load OBJ models then start
 scene.background = new THREE.Color(0x000510);
-requestAnimationFrame(loop);
+loadOBJModels().then(() => {
+  buildTemplates(0);
+  requestAnimationFrame(loop);
+});
