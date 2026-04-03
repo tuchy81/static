@@ -1,7 +1,82 @@
-<html>
+<!DOCTYPE html>
+<html lang="ko">
 <head>
-<title>hello</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>갤러그 - 은하 전쟁</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Segoe UI',sans-serif;}
+canvas{display:block;}
+#ui{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+#ui.active{pointer-events:auto;}
+.scr{display:none;flex-direction:column;align-items:center;color:#fff;text-align:center;}
+.scr.vis{display:flex;}
+#style-screen h1{font-size:52px;color:#ffe100;text-shadow:0 0 30px #ff0,0 0 60px #f80;margin-bottom:6px;letter-spacing:2px;}
+#style-screen h2{font-size:20px;color:#0ff;margin-bottom:32px;font-weight:400;}
+.cards{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;}
+.card{width:230px;padding:22px 18px;border:2px solid #333;border-radius:14px;background:rgba(255,255,255,0.03);cursor:pointer;transition:all .3s;text-align:center;}
+.card:hover{border-color:#0ff;background:rgba(0,255,255,0.07);box-shadow:0 0 30px rgba(0,255,255,0.15);transform:translateY(-5px);}
+.card .icon{font-size:60px;margin-bottom:14px;}
+.card .tit{font-size:21px;font-weight:700;margin-bottom:8px;}
+.card .desc{font-size:13px;color:#999;line-height:1.6;}
+.c0 .tit{color:#4af;} .c1 .tit{color:#f55;} .c2 .tit{color:#6f6;}
+.info{color:#555;font-size:13px;margin-top:26px;}
+#go-screen h1{font-size:46px;color:#f44;margin-bottom:10px;}
+#go-screen .sl{font-size:28px;color:#ff0;margin:16px 0;}
+.btn{padding:14px 46px;font-size:20px;color:#fff;background:0;border:2px solid #0ff;cursor:pointer;transition:all .3s;margin:8px;border-radius:6px;font-family:inherit;}
+.btn:hover{background:rgba(0,255,255,.12);box-shadow:0 0 22px #0ff;}
+.btn.sec{border-color:#666;}
+#hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:12px 24px;pointer-events:none;font-size:20px;font-weight:600;color:#fff;text-shadow:0 0 8px rgba(0,0,0,.8);}
+#hud span{min-width:120px;}
+#hud .sc{color:#fff;text-align:left;}
+#hud .st{color:#0f0;text-align:center;}
+#hud .lv{color:#f44;text-align:right;}
+#hud.hidden{display:none;}
+#stage-banner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;text-align:center;opacity:0;transition:opacity .3s;}
+#stage-banner.vis{opacity:1;}
+#stage-banner .t1{font-size:48px;font-weight:700;color:#ffe100;text-shadow:0 0 20px #ff0;}
+#stage-banner .t2{font-size:24px;margin-top:8px;text-shadow:0 0 10px rgba(0,0,0,.8);}
+</style>
 </head>
 <body>
-it's go to code again.
+<div id="hud" class="hidden">
+  <span class="sc" id="hScore">점수: 0</span>
+  <span class="st" id="hStage">단계: 1</span>
+  <span class="lv" id="hLives">♥♥♥</span>
+</div>
+<div id="stage-banner"><div class="t1" id="bannerT1"></div><div class="t2" id="bannerT2"></div></div>
+<div id="ui" class="active">
+  <div id="style-screen" class="scr vis">
+    <h1>은하 전쟁</h1>
+    <h2>스타일을 선택하세요</h2>
+    <div class="cards">
+      <div class="card c0" onclick="selectStyle(0)">
+        <div class="icon">✈️</div>
+        <div class="tit">F-35 스텔스</div>
+        <div class="desc">최첨단 F-35 전투기로<br>외계 로봇 군단을 격파하라!</div>
+      </div>
+      <div class="card c1" onclick="selectStyle(1)">
+        <div class="icon">🍉</div>
+        <div class="tit">수박씨 뱉기</div>
+        <div class="desc">수박을 먹던 사람이<br>씨를 뱉어 과일 적군을 물리쳐라!</div>
+      </div>
+      <div class="card c2" onclick="selectStyle(2)">
+        <div class="icon">🏹</div>
+        <div class="tit">좀비 헌터</div>
+        <div class="desc">화살로 밀려오는<br>좀비 군단을 처치하라!</div>
+      </div>
+    </div>
+    <div class="info">방향키/WASD: 이동 · Space: 발사 · Enter: 시작</div>
+  </div>
+  <div id="go-screen" class="scr">
+    <h1>게임 오버</h1>
+    <div class="sl">최종 점수: <span id="fScore">0</span></div>
+    <button class="btn" id="btnRestart">다시 시작</button>
+    <button class="btn sec" id="btnMenu">스타일 선택</button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="game.js"></script>
 </body>
+</html>
