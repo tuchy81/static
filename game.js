@@ -109,13 +109,11 @@ let joystickTouchId = null;
 let joystickStartX = 0, joystickStartY = 0;
 
 function isMobile() {
-  return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (window.innerWidth <= 1024);
 }
 
 function setupTouchControls() {
-  if (!isMobile()) return;
-  const tc = document.getElementById('touch-controls');
-  tc.classList.add('vis');
+  // 항상 터치 이벤트 등록 (태블릿/하이브리드 대응)
 
   const area = document.getElementById('joystick-area');
   const knob = document.getElementById('joystick-knob');
@@ -1025,7 +1023,15 @@ function startGame() {
   document.getElementById('ui').classList.remove('active');
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('vis'));
   document.getElementById('hud').classList.remove('hidden');
-  if (isMobile()) document.getElementById('touch-controls').classList.add('vis');
+  // 모바일/터치 디바이스면 터치 컨트롤 표시
+  if (isMobile()) {
+    document.getElementById('touch-controls').classList.add('vis');
+  }
+  // 첫 터치 이벤트 감지 시에도 활성화
+  window.addEventListener('touchstart', function showTouch() {
+    document.getElementById('touch-controls').classList.add('vis');
+    window.removeEventListener('touchstart', showTouch);
+  }, { once: true });
   showBanner();
 }
 
