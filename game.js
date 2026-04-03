@@ -23,10 +23,10 @@ function loadOBJModels() {
         obj.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
         // Apply F-35 stealth colors per part
         const colors = [
-          0x4a4e53, 0x5a5e63, 0x52565b, 0x3a3d42, 0x5a5e63,
-          0x4a4e53, 0x52565b, 0x3a3d42, 0x5a5e63, 0x4a4e53,
-          0x52565b, 0x5a5e63, 0x4a4e53, 0x3a3d42, 0x52565b,
-          0x5a5e63, 0x4a4e53
+          0x8a9099, 0x9aa0a8, 0x9298a2, 0x7a8088, 0x9aa0a8,
+          0x8a9099, 0x9298a2, 0x7a8088, 0x9aa0a8, 0x8a9099,
+          0x9298a2, 0x9aa0a8, 0x8a9099, 0x7a8088, 0x9298a2,
+          0x9aa0a8, 0x8a9099
         ];
         let idx = 0;
         obj.traverse(child => {
@@ -256,11 +256,11 @@ function buildF35() {
   // Fallback: simple placeholder if OBJ failed to load
   const g = new THREE.Group();
   const bodyGeo = new THREE.ConeGeometry(0.3, 2.5, 4);
-  const body = new THREE.Mesh(bodyGeo, M(0x5a5e63, { roughness: 0.3, metalness: 0.7 }));
+  const body = new THREE.Mesh(bodyGeo, M(0x9aa0a8, { roughness: 0.3, metalness: 0.7 }));
   body.rotation.x = Math.PI / 2;
   g.add(body);
   const wingGeo = new THREE.BoxGeometry(2.5, 0.04, 0.6);
-  g.add(new THREE.Mesh(wingGeo, M(0x52565b, { roughness: 0.35, metalness: 0.7 })));
+  g.add(new THREE.Mesh(wingGeo, M(0x9298a2, { roughness: 0.35, metalness: 0.7 })));
   const abGeo = new THREE.ConeGeometry(0.11, 0.5, 8);
   const ab = new THREE.Mesh(abGeo, MEmit(0xff6600, 2));
   ab.rotation.x = -Math.PI / 2; ab.position.set(0, 0, 1.4); ab.name = 'afterburner';
@@ -1023,15 +1023,10 @@ function startGame() {
   document.getElementById('ui').classList.remove('active');
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('vis'));
   document.getElementById('hud').classList.remove('hidden');
-  // 모바일/터치 디바이스면 터치 컨트롤 표시
+  // 모바일/터치 디바이스면 터치 컨트롤 표시 (게임 시작 후에만)
   if (isMobile()) {
     document.getElementById('touch-controls').classList.add('vis');
   }
-  // 첫 터치 이벤트 감지 시에도 활성화
-  window.addEventListener('touchstart', function showTouch() {
-    document.getElementById('touch-controls').classList.add('vis');
-    window.removeEventListener('touchstart', showTouch);
-  }, { once: true });
   showBanner();
 }
 
